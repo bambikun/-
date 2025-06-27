@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8" />
-<title>画像サイズフィルター＆ZIPダウンロードツール</title>
+<title>画像サイズ＆透明ピクセルフィルター＆ZIPダウンロード</title>
 <style>
   body { font-family: sans-serif; padding: 20px; background: #f0f0f0;}
   #downloadBtn { padding: 10px 20px; font-size: 16px; }
@@ -39,6 +39,10 @@
   #inputArea {
     margin-bottom: 10px;
   }
+  #checkboxArea {
+    margin-top: 5px;
+    font-weight: normal;
+  }
 </style>
 </head>
 <body>
@@ -48,6 +52,13 @@
   <input id="widthInput" type="number" min="1" value="300" />
   <label for="heightInput">高さ(px): </label>
   <input id="heightInput" type="number" min="1" value="300" />
+</div>
+
+<div id="checkboxArea">
+  <label>
+    <input id="transparencyFilter" type="checkbox" />
+    透明ピクセルを含む画像を除外する
+  </label>
 </div>
 
 <button id="downloadBtn" disabled>ZIPでダウンロード</button>
@@ -65,21 +76,41 @@
   const log = document.getElementById('log');
   const widthInput = document.getElementById('widthInput');
   const heightInput = document.getElementById('heightInput');
+  const transparencyCheckbox = document.getElementById('transparencyFilter');
 
-  // ドラッグされたファイル一覧を保持
   let filteredFiles = [];
 
-  // ログ表示関数
   function addLog(text) {
     log.textContent += text + '\n';
     log.scrollTop = log.scrollHeight;
   }
 
-  // ファイルの画像サイズを取得してフィルタリング
-  function filterImages(files, filterWidth, filterHeight) {
+  // 透明ピクセルチェック用関数
+  function hasTransparency(img) {
+    // Canvasに描画して透過ピクセル検査
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    const imageData = ctx.getImageData(0, 0, img.width, img.height);
+    const data = imageData.data;
+    // RGBAで4要素ずつ見る alphaが0未満は透明
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] < 255) return true; // 透明あり
+    }
+    return false; // 透明なし
+  }
+
+  function filterImages(files, filterWidth, filterHeight, excludeTransparency) {
     filteredFiles = [];
     log.textContent = '';
-    addLog(`指定サイズ: 幅 ${filterWidth}px × 高さ ${filterHeight}px 以外の画像は除外します。\n`);
+    addLog(`指定サイズ: 幅 ${filterWidth}px × 高さ ${filterHeight}px のみ許可`);
+    if (excludeTransparency) {
+      addLog('透明ピクセルを含む画像は除外します。\n');
+    } else {
+      addLog('透明ピクセルの有無は無視します。\n');
+    }
 
     let loadCount = 0;
     const total = files.length;
@@ -92,15 +123,25 @@
         continue;
       }
 
-      // 画像のサイズを取得
       const img = new Image();
       img.onload = () => {
-        if (img.width === filterWidth && img.height === filterHeight) {
-          filteredFiles.push(file);
-          addLog(`サイズOK: ${file.name} (${img.width}×${img.height})`);
-        } else {
-          addLog(`除外: ${file.name} (${img.width}×${img.height})`);
+        let isValid = (img.width === filterWidth && img.height === filterHeight);
+        if (!isValid) {
+          addLog(`除外: サイズ不一致 ${file.name} (${img.width}×${img.height})`);
+          loadCount++;
+          if (loadCount === total) finishFiltering();
+          return;
         }
+
+        if (excludeTransparency && hasTransparency(img)) {
+          addLog(`除外: 透明ピクセルあり ${file.name}`);
+          loadCount++;
+          if (loadCount === total) finishFiltering();
+          return;
+        }
+
+        filteredFiles.push(file);
+        addLog(`サイズOK: ${file.name} (${img.width}×${img.height})`);
         loadCount++;
         if (loadCount === total) finishFiltering();
       };
@@ -113,7 +154,6 @@
     }
   }
 
-  // フィルター処理完了後
   function finishFiltering() {
     if (filteredFiles.length > 0) {
       downloadBtn.disabled = false;
@@ -124,7 +164,6 @@
     }
   }
 
-  // ZIPにまとめてダウンロード
   async function downloadZip() {
     const zip = new JSZip();
     for (const file of filteredFiles) {
@@ -141,7 +180,6 @@
     URL.revokeObjectURL(a.href);
   }
 
-  // ドラッグ＆ドロップイベント
   dropZone.addEventListener('dragover', e => {
     e.preventDefault();
     dropZone.style.borderColor = '#00aaff';
@@ -162,9 +200,9 @@
     const files = e.dataTransfer.files;
     if (!files.length) return;
 
-    // 入力値を数値として取得
     const filterWidth = parseInt(widthInput.value, 10);
     const filterHeight = parseInt(heightInput.value, 10);
+    const excludeTransparency = transparencyCheckbox.checked;
 
     if (isNaN(filterWidth) || filterWidth <= 0 || isNaN(filterHeight) || filterHeight <= 0) {
       alert('幅と高さには正の整数を入力してください。');
@@ -172,7 +210,7 @@
     }
 
     addLog('\n----- 新しいファイル群を処理開始 -----');
-    filterImages(files, filterWidth, filterHeight);
+    filterImages(files, filterWidth, filterHeight, excludeTransparency);
   });
 
   downloadBtn.addEventListener('click', () => {
