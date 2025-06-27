@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<title>画像サイズフィルター＆ZIPダウンロードツール</title>
+<style>
+  body { font-family: sans-serif; padding: 20px; background: #f0f0f0;}
+  #downloadBtn { padding: 10px 20px; font-size: 16px; }
+  #dropZone {
+    margin-top: 10px;
+    border: 3px dashed #aaa;
+    background: #fff;
+    height: 200px;
+    line-height: 200px;
+    text-align: center;
+    color: #666;
+    font-size: 18px;
+    user-select: none;
+  }
+  #log {
+    margin-top: 20px;
+    white-space: pre-wrap;
+    background: #222;
+    color: #eee;
+    padding: 10px;
+    height: 150px;
+    overflow-y: auto;
+    font-family: monospace;
+  }
+  label {
+    margin-right: 15px;
+    font-weight: bold;
+  }
+  input[type=number] {
+    width: 80px;
+    padding: 5px;
+    font-size: 16px;
+  }
+  #inputArea {
+    margin-bottom: 10px;
+  }
+</style>
+</head>
+<body>
+
+<div id="inputArea">
+  <label for="widthInput">幅(px): </label>
+  <input id="widthInput" type="number" min="1" value="300" />
+  <label for="heightInput">高さ(px): </label>
+  <input id="heightInput" type="number" min="1" value="300" />
+</div>
+
+<button id="downloadBtn" disabled>ZIPでダウンロード</button>
+
+<div id="dropZone">ここに画像ファイルを複数ドラッグ＆ドロップ</div>
+
+<div id="log"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+<script>
+(() => {
+  const dropZone = document.getElementById('dropZone');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const log = document.getElementById('log');
+  const widthInput = document.getElementById('widthInput');
+  const heightInput = document.getElementById('heightInput');
+
+  // ドラッグされたファイル一覧を保持
+  let filteredFiles = [];
+
+  // ログ表示関数
+  function addLog(text) {
+    log.textContent += text + '\n';
+    log.scrollTop = log.scrollHeight;
+  }
+
+  // ファイルの画像サイズを取得してフィルタリング
+  function filterImages(files, filterWidth, filterHeight) {
+    filteredFiles = [];
+    log.textContent = '';
+    addLog(`指定サイズ: 幅 ${filterWidth}px × 高さ ${filterHeight}px 以外の画像は除外します。\n`);
+
+    let loadCount = 0;
+    const total = files.length;
+
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) {
+        addLog(`画像ファイルではないため除外: ${file.name}`);
+        loadCount++;
+        if (loadCount === total) finishFiltering();
+        continue;
+      }
+
+      // 画像のサイズを取得
+      const img = new Image();
+      img.onload = () => {
+        if (img.width === filterWidth && img.height === filterHeight) {
+          filteredFiles.push(file);
+          addLog(`サイズOK: ${file.name} (${img.width}×${img.height})`);
+        } else {
+          addLog(`除外: ${file.name} (${img.width}×${img.height})`);
+        }
+        loadCount++;
+        if (loadCount === total) finishFiltering();
+      };
+      img.onerror = () => {
+        addLog(`画像として読み込めませんでした: ${file.name}`);
+        loadCount++;
+        if (loadCount === total) finishFiltering();
+      };
+      img.src = URL.createObjectURL(file);
+    }
+  }
+
+  // フィルター処理完了後
+  function finishFiltering() {
+    if (filteredFiles.length > 0) {
+      downloadBtn.disabled = false;
+      addLog(`\n${filteredFiles.length} ファイルがフィルターに合格しました。ダウンロード可能です。`);
+    } else {
+      downloadBtn.disabled = true;
+      addLog(`\n条件を満たす画像はありません。`);
+    }
+  }
+
+  // ZIPにまとめてダウンロード
+  async function downloadZip() {
+    const zip = new JSZip();
+    for (const file of filteredFiles) {
+      zip.file(file.name, file);
+    }
+    addLog('\nZIPファイル作成中...');
+    const content = await zip.generateAsync({type:"blob"});
+    addLog('作成完了。ダウンロード開始。');
+
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(content);
+    a.download = 'filtered_images.zip';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  // ドラッグ＆ドロップイベント
+  dropZone.addEventListener('dragover', e => {
+    e.preventDefault();
+    dropZone.style.borderColor = '#00aaff';
+    dropZone.style.color = '#00aaff';
+  });
+
+  dropZone.addEventListener('dragleave', e => {
+    e.preventDefault();
+    dropZone.style.borderColor = '#aaa';
+    dropZone.style.color = '#666';
+  });
+
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.style.borderColor = '#aaa';
+    dropZone.style.color = '#666';
+
+    const files = e.dataTransfer.files;
+    if (!files.length) return;
+
+    // 入力値を数値として取得
+    const filterWidth = parseInt(widthInput.value, 10);
+    const filterHeight = parseInt(heightInput.value, 10);
+
+    if (isNaN(filterWidth) || filterWidth <= 0 || isNaN(filterHeight) || filterHeight <= 0) {
+      alert('幅と高さには正の整数を入力してください。');
+      return;
+    }
+
+    addLog('\n----- 新しいファイル群を処理開始 -----');
+    filterImages(files, filterWidth, filterHeight);
+  });
+
+  downloadBtn.addEventListener('click', () => {
+    if (filteredFiles.length === 0) return;
+    downloadZip();
+  });
+})();
+</script>
+
+</body>
+</html>
